@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function board(boardId) { return get(/databases/$(database)/documents/boards/$(boardId)); }
+    function member(boardId) { return signedIn() && (board(boardId).data.userId == request.auth.uid || board(boardId).data.memberIds.hasAny([request.auth.uid])); }
+    function owner(boardId) { return signedIn() && board(boardId).data.userId == request.auth.uid; }
+    function safeBoardUpdate(boardId) {
+      return member(boardId)
+        && request.resource.data.userId == resource.data.userId
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['memberIds', 'members']) || owner(boardId));
+    }
+    match /profiles/{userId} {
+      allow create, update: if signedIn() && request.auth.uid == userId;
+      allow read: if signedIn();
+    }
+    match /boards/{boardId} {
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || resource.data.memberIds.hasAny([request.auth.uid]));
+      allow update: if safeBoardUpdate(boardId);
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+    match /tasks/{taskId} {
+      allow create: if signedIn() && member(request.resource.data.boardId);
+      allow read, delete: if member(resource.data.boardId);
+      allow update: if member(resource.data.boardId) && request.resource.data.boardId == resource.data.boardId;
+    }
+    match /workspaces/{workspaceId} {
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow read, update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+    match /lists/{listId} {
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow read, update, delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
